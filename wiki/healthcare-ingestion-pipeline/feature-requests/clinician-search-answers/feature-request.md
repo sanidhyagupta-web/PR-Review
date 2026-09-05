@@ -12,10 +12,12 @@ identity_confirmed: false
 ---
 
 ## Current State
-No query path exists yet: documents are parsed, chunked, masked, embedded, and indexed, but
-there is currently no way for a clinician to ask a question and get an answer. This feature
-request defines that query/answer layer — a search endpoint the UI calls (never the reverse),
-role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md).
+A query path already exists in `ui/search_page.py` — rate limiting, input guardrail, PII-aware
+retrieval, rerank, a Claude-generated answer with citations, output guardrail, and audit logging
+— including citations rendered as expandable source cards. It does not yet satisfy DEC-0001: the
+UI calls retrieval modules directly instead of going through an API endpoint. It is also missing
+DEC-0007 (no search id or feedback mechanism) and shows a page number instead of a date on
+citation cards, short of DEC-0003's literal requirement — [DEC-0011](../../decisions/DEC-0011_existing-search-ui-violates-dec-0001-and-dec-0007.md).
 
 ## Key Facts
 - Every claim in a generated answer already carries an inline citation marker mapping back to
@@ -63,6 +65,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 | 2026-09-02 | [Streaming vs. post-validation wait](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md) | unresolved | |
 | 2026-09-02 | [Source display breadth](../../decisions/DEC-0009_source-display-breadth.md) | unresolved | |
 | 2026-09-02 | [Scope boundaries for search v1](../../decisions/DEC-0010_scope-boundaries-search-v1.md) | rejected | |
+| 2026-09-05 | [Existing search UI violates DEC-0001 and DEC-0007](../../decisions/DEC-0011_existing-search-ui-violates-dec-0001-and-dec-0007.md) | rejected | [Linear](https://linear.app/flightdecktest-2/issue/RYT-4/dec-0003-citations-as-expandable-source-cards) |
 
 ## Evidence
 - [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md)
@@ -75,8 +78,13 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - [DEC-0008](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md)
 - [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md)
 - [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md)
+- [DEC-0011](../../decisions/DEC-0011_existing-search-ui-violates-dec-0001-and-dec-0007.md)
 
 ## Open Questions
+- Whether to re-scope RYT-4 as "bring the existing citation/search UI into compliance with
+  DEC-0001 and DEC-0007, plus add the missing date field" rather than "build citation rendering
+  from scratch" — raised by the round-1 codebase reality check —
+  [DEC-0011](../../decisions/DEC-0011_existing-search-ui-violates-dec-0001-and-dec-0007.md).
 - Is `clinician-search-answers` the right feature request for this work, or does it belong to an
   existing one? Created by an agent from ticket
   `meeting-1mzUHFjWDrGKYmESQM5TC-ZV75BaVdoRvp4C1I2BP1h4-2026-09-05T08-35-54-082Z`; rename or merge
@@ -111,6 +119,10 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - Search history, saved searches, cross-patient analytics, single-patient filtering, and any
   ingestion-pipeline change were explicitly rejected as in scope for this pass —
   [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md).
+- RYT-4 assumed a clean slate for citation UI; codebase reality check found `ui/search_page.py`
+  already implements it but out of compliance with DEC-0001 and DEC-0007 — rejected as scoped,
+  needs re-scoping as a compliance fix rather than a net-new build —
+  [DEC-0011](../../decisions/DEC-0011_existing-search-ui-violates-dec-0001-and-dec-0007.md).
 
 ## Relationships
 **Depends On:** Nothing recorded yet.
