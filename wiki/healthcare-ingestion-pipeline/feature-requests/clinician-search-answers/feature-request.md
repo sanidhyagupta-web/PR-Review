@@ -64,6 +64,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 | 2026-09-02 | [Source display breadth](../../decisions/DEC-0009_source-display-breadth.md) | unresolved | |
 | 2026-09-02 | [Scope boundaries for search v1](../../decisions/DEC-0010_scope-boundaries-search-v1.md) | rejected | |
 | 2026-09-05 | [Insufficient-context detection: real-failure carve-out and heuristic validation (Q6/Q7)](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| 2026-09-05 | [Citation-validity check and generate_answer contract-change ownership (Q8/Q9)](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
 
 ## Evidence
 - [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md)
@@ -77,6 +78,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md)
 - [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md)
 - [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md)
+- [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md)
 
 ## Open Questions
 - Is `clinician-search-answers` the right feature request for this work, or does it belong to an
@@ -98,13 +100,18 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - Whether the UI shows only the sources the model actually cited, all five chunks the model was
   given, or a browsable superset — a design question to be mocked, not argued —
   [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md).
-- Whether validating the `cited_indices == []` insufficient-context heuristic against
-  `evaluation/test_dataset.json` blocks ticket completion, and whether `generate_answer`'s return
-  contract needs to change to structurally distinguish a real failure from genuine
-  insufficient-context — [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md).
+- Whether this ticket's classifier or a future DEC-0008 leakage/citation-integrity check owns
+  citation-validity determination, and whether this ticket or RYT-2 implements the
+  `generate_answer` → `AnswerResult` contract change that acceptance criterion 4 depends on —
+  [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md).
 
 **Resolved:**
-- Nothing recorded yet.
+- ~~Whether validating the `cited_indices == []` insufficient-context heuristic against
+  `evaluation/test_dataset.json` blocks ticket completion, and whether `generate_answer`'s return
+  contract needs to change to structurally distinguish a real failure from genuine
+  insufficient-context.~~ → resolved by
+  [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md): not
+  blocking (replaced with a unit-test AC), and yes, the contract must change.
 
 ## Risks / Rejected Approaches
 - Rendering role-filtered-out results with no disclosure risks a clinician believing they have
