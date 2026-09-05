@@ -1,13 +1,32 @@
 """
 Anthropic Claude client for RAG-based answer generation.
-Returns (answer_text, cited_excerpt_indices) so the UI can render source cards.
+Returns an AnswerResult(text, cited_indices) so the UI can render source cards.
+Real failures (missing credentials, an API/client error) raise LLMUnavailable rather than
+being encoded as answer text — see resolve_search_outcome() for how callers classify the
+outcome of a search (answered / insufficient_context / error).
 """
 from __future__ import annotations
 import re
 import logging
+from dataclasses import dataclass
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+OUTCOME_ANSWERED = "answered"
+OUTCOME_INSUFFICIENT_CONTEXT = "insufficient_context"
+OUTCOME_ERROR = "error"
+
+
+class LLMUnavailable(Exception):
+    """Raised when the LLM cannot be reached or invoked — missing credentials or an API/client error."""
+
+
+@dataclass
+class AnswerResult:
+    text: str
+    cited_indices: list[int]
+
 
 _SYSTEM_PROMPT = """You are a HIPAA-compliant medical record assistant for authorised healthcare professionals.
 
@@ -28,23 +47,27 @@ def generate_answer(
     query: str,
     context_chunks: list[dict],
     role: str,
-) -> tuple[str, list[int]]:
+) -> AnswerResult:
     """
     Call Claude with retrieved chunks as context.
 
     Returns:
-        (answer_text, cited_indices)
-        cited_indices — 1-based excerpt numbers referenced in the answer
+        AnswerResult(text, cited_indices) — cited_indices are 1-based excerpt
+        numbers referenced in the answer.
+
+    Raises:
+        LLMUnavailable: the API key is not configured, or the call to the LLM failed.
+        This is a real failure, distinct from an empty-context answer — callers must not
+        treat it as an "insufficient context" result.
     """
     if not settings.anthropic_api_key:
-        return (
+        raise LLMUnavailable(
             "Anthropic API key is not configured. "
-            "Add ANTHROPIC_API_KEY to your .env file and restart the app.",
-            [],
+            "Add ANTHROPIC_API_KEY to your .env file and restart the app."
         )
 
     if not context_chunks:
-        return "No relevant medical records were found for your query.", []
+        return AnswerResult(text="No relevant medical records were found for your query.", cited_indices=[])
 
     context_parts = []
     for i, chunk in enumerate(context_chunks, 1):
@@ -80,8 +103,35 @@ def generate_answer(
         cited = sorted({int(n) for n in re.findall(r"\[(\d+)\]", answer)
                         if 1 <= int(n) <= len(context_chunks)})
 
-        return answer, cited
+        return AnswerResult(text=answer, cited_indices=cited)
 
     except Exception as exc:
         logger.error("Claude API error: %s", exc)
-        return f"LLM unavailable: {exc}", []
+        raise LLMUnavailable(f"LLM unavailable: {exc}") from exc
+
+
+def resolve_search_outcome(
+    query: str,
+    top_chunks: list[dict],
+    role: str,
+) -> tuple[str, AnswerResult | None]:
+    """
+    Classify a search into one outcome: "answered", "insufficient_context", or "error".
+
+    insufficient_context covers both triggers from DEC-0004: retrieval returned zero
+    role-visible chunks, or chunks were retrieved but the answer cited none of them.
+    error means generate_answer could not be reached at all (LLMUnavailable) — this must
+    never be conflated with insufficient_context.
+    """
+    if not top_chunks:
+        return OUTCOME_INSUFFICIENT_CONTEXT, None
+
+    try:
+        result = generate_answer(query, top_chunks, role)
+    except LLMUnavailable:
+        return OUTCOME_ERROR, None
+
+    if not result.cited_indices:
+        return OUTCOME_INSUFFICIENT_CONTEXT, result
+
+    return OUTCOME_ANSWERED, result

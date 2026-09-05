@@ -22,7 +22,12 @@ from app.dependencies import rate_limiter
 from indexing.reranker import rerank
 from indexing.pii_entity_index import get_chunk_ids_for_entities
 from ingestion.pii.pii_detector import detect_pii
-from llm.claude_client import generate_answer
+from llm.claude_client import (
+    resolve_search_outcome,
+    OUTCOME_ANSWERED,
+    OUTCOME_INSUFFICIENT_CONTEXT,
+    OUTCOME_ERROR,
+)
 
 
 # ── Internal search helpers ───────────────────────────────────────────────────
@@ -178,14 +183,13 @@ def render() -> None:
         with st.spinner("Re-ranking with cross-encoder…"):
             top_chunks = rerank(query, candidates, top_k=n_results)
 
-        # ── 6. LLM answer generation ──────────────────────────────────────────
+        # ── 6. LLM answer generation → outcome classification ─────────────────
         with st.spinner("Generating answer with Claude…"):
-            raw_answer, cited_indices = generate_answer(query, top_chunks, role)
+            outcome, result = resolve_search_outcome(query, top_chunks, role)
 
-        # ── 7. Output guardrail (PII sanitisation) ────────────────────────────
-        answer = sanitise_output(raw_answer)
+        cited_indices = result.cited_indices if result else []
 
-        # ── 8. Audit log ──────────────────────────────────────────────────────
+        # ── 7. Audit log — fires once, for every outcome ───────────────────────
         log_event("SEARCH", user_id=username, query=query,
                   details={
                       "mode": search_mode,
@@ -193,36 +197,60 @@ def render() -> None:
                       "role": role,
                       "pii_filter_applied": chunk_id_filter is not None,
                       "cited_excerpts": cited_indices,
+                      "outcome": outcome,
                   })
 
-        if not top_chunks:
-            st.warning("No results found. Try a broader query or ingest more documents.")
+        # ── 8. Real failure — not an answer, not "no relevant records" ─────────
+        if outcome == OUTCOME_ERROR:
+            st.error("The assistant is temporarily unavailable. Please try again shortly.")
             return
 
-        # ── 9. Display answer ─────────────────────────────────────────────────
+        # ── 9. Insufficient context — its own state (DEC-0004) ─────────────────
+        if outcome == OUTCOME_INSUFFICIENT_CONTEXT:
+            st.markdown("### No relevant records found")
+            st.write("The available records do not contain enough information to answer this question.")
+
+            if top_chunks:
+                with st.expander(
+                    f"Closest matches — none answered your question ({len(top_chunks)})",
+                    expanded=False,
+                ):
+                    for i, r in enumerate(top_chunks, 1):
+                        meta = r.get("metadata", {})
+                        st.markdown(
+                            f"**[{i}]  {meta.get('source_section', '—')}**  "
+                            f"·  `{meta.get('source_file', '—')}`  "
+                            f"·  rerank `{r.get('rerank_score', 0):.3f}`"
+                        )
+                        st.markdown(_highlight(r.get("text", ""), query))
+                        st.markdown("---")
+            return
+
+        # ── 10. Display answer ──────────────────────────────────────────────────
+        assert outcome == OUTCOME_ANSWERED
+        answer = sanitise_output(result.text)
         st.markdown("### Answer")
         st.info(answer)
 
-        # ── 10. Citations ─────────────────────────────────────────────────────
-        if cited_indices:
-            st.markdown("### Citations")
-            for idx in cited_indices:
-                chunk = top_chunks[idx - 1]   # 1-based → 0-based
-                meta = chunk.get("metadata", {})
-                with st.expander(
-                    f"[{idx}]  {meta.get('source_section', 'Unknown')}  ·  "
-                    f"{meta.get('source_file', '—')}  ·  "
-                    f"Page {meta.get('source_page', '—')}  ·  "
-                    f"Dept: {meta.get('department', '—')}",
-                    expanded=False,
-                ):
-                    st.markdown(_highlight(chunk.get("text", ""), query))
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("Patient ID", meta.get("patient_id", "—"))
-                    c2.metric("Doc ID", str(meta.get("doc_id", "—"))[:10] + "…")
-                    c3.metric("Rerank score", f"{chunk.get('rerank_score', 0):.3f}")
+        # ── 11. Citations ────────────────────────────────────────────────────────
+        st.markdown("### Citations")
+        for idx in cited_indices:
+            chunk = top_chunks[idx - 1]   # 1-based → 0-based
+            meta = chunk.get("metadata", {})
+            with st.expander(
+                f"[{idx}]  {meta.get('source_section', 'Unknown')}  ·  "
+                f"{meta.get('source_file', '—')}  ·  "
+                f"Page {meta.get('source_page', '—')}  ·  "
+                f"Dept: {meta.get('department', '—')}",
+                expanded=False,
+            ):
+                st.markdown(_highlight(chunk.get("text", ""), query))
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Patient ID", meta.get("patient_id", "—"))
+                c2.metric("Doc ID", str(meta.get("doc_id", "—"))[:10] + "…")
+                c3.metric("Rerank score", f"{chunk.get('rerank_score', 0):.3f}")
 
-        # ── 11. All supporting excerpts ───────────────────────────────────────
+        # ── 12. All supporting excerpts ─────────────────────────────────────────
         with st.expander(f"All {len(top_chunks)} retrieved excerpts", expanded=False):
             for i, r in enumerate(top_chunks, 1):
                 meta = r.get("metadata", {})
