@@ -63,6 +63,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 | 2026-09-02 | [Streaming vs. post-validation wait](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md) | unresolved | |
 | 2026-09-02 | [Source display breadth](../../decisions/DEC-0009_source-display-breadth.md) | unresolved | |
 | 2026-09-02 | [Scope boundaries for search v1](../../decisions/DEC-0010_scope-boundaries-search-v1.md) | rejected | |
+| 2026-09-05 | [Insufficient-context detection: real-failure carve-out and heuristic validation (Q6/Q7)](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
 
 ## Evidence
 - [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md)
@@ -75,6 +76,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - [DEC-0008](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md)
 - [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md)
 - [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md)
+- [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md)
 
 ## Open Questions
 - Is `clinician-search-answers` the right feature request for this work, or does it belong to an
@@ -96,6 +98,10 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - Whether the UI shows only the sources the model actually cited, all five chunks the model was
   given, or a browsable superset — a design question to be mocked, not argued —
   [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md).
+- Whether validating the `cited_indices == []` insufficient-context heuristic against
+  `evaluation/test_dataset.json` blocks ticket completion, and whether `generate_answer`'s return
+  contract needs to change to structurally distinguish a real failure from genuine
+  insufficient-context — [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md).
 
 **Resolved:**
 - Nothing recorded yet.
