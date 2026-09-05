@@ -65,6 +65,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 | 2026-09-02 | [Scope boundaries for search v1](../../decisions/DEC-0010_scope-boundaries-search-v1.md) | rejected | |
 | 2026-09-05 | [Insufficient-context detection: real-failure carve-out and heuristic validation (Q6/Q7)](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
 | 2026-09-05 | [Citation-validity check and generate_answer contract-change ownership (Q8/Q9)](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| 2026-09-05 | [Failure-exception typing and audit-event ownership (Q10/Q11)](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
 
 ## Evidence
 - [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md)
@@ -79,6 +80,7 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md)
 - [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md)
 - [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md)
+- [DEC-0013](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md)
 
 ## Open Questions
 - Is `clinician-search-answers` the right feature request for this work, or does it belong to an
@@ -100,10 +102,11 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - Whether the UI shows only the sources the model actually cited, all five chunks the model was
   given, or a browsable superset — a design question to be mocked, not argued —
   [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md).
-- Whether this ticket's classifier or a future DEC-0008 leakage/citation-integrity check owns
-  citation-validity determination, and whether this ticket or RYT-2 implements the
-  `generate_answer` → `AnswerResult` contract change that acceptance criterion 4 depends on —
-  [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md).
+- Whether `generate_answer`'s infra-failure path should raise the bare underlying exception or a
+  typed exception class RYT-2 can catch specifically, and whether RYT-5 updates the existing
+  `log_event` call at `ui/search_page.py:189` with the new `outcome` field now or defers that
+  entirely to RYT-2's endpoint —
+  [DEC-0013](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md).
 
 **Resolved:**
 - ~~Whether validating the `cited_indices == []` insufficient-context heuristic against
@@ -112,6 +115,13 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
   insufficient-context.~~ → resolved by
   [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md): not
   blocking (replaced with a unit-test AC), and yes, the contract must change.
+- ~~Whether this ticket's classifier or a future DEC-0008 leakage/citation-integrity check owns
+  citation-validity determination, and whether this ticket or RYT-2 implements the
+  `generate_answer` → `AnswerResult` contract change that acceptance criterion 4 depends on.~~ →
+  resolved by
+  [DEC-0013](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md): the
+  future DEC-0008 integrity check owns citation validity, and RYT-5 (not RYT-2) implements the
+  contract change.
 
 ## Risks / Rejected Approaches
 - Rendering role-filtered-out results with no disclosure risks a clinician believing they have
