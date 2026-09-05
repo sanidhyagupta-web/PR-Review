@@ -23,9 +23,11 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - The reranker returns five chunks to the model, but the model may cite only some of them —
   how many the UI surfaces is open, see Open Questions —
   [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md).
-- Answer generation runs a post-generation leakage/citation-integrity check; this is why
-  streaming is contested, see Open Questions —
-  [DEC-0008](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md).
+- No post-generation leakage/citation-integrity check exists yet — only a regex at
+  `llm/claude_client.py:80-81` checks for well-formed, in-range citation markers; a real
+  integrity check is planned but not built, which affects DEC-0008's streaming-vs-wait latency
+  premise —
+  [DEC-0014](../../decisions/DEC-0014_insufficient-context-contract-finalized.md).
 
 ## Requirements
 - The client-facing search capability must be a real API endpoint; the UI is a client of that
@@ -43,6 +45,12 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - Every search gets a minted search id; per-search feedback is thumbs up/down with an optional
   free-text reason on a thumbs-down, attached to that search id —
   [DEC-0007](../../decisions/DEC-0007_per-search-feedback.md).
+- `generate_answer` returns a typed `AnswerResult` (`outcome`, `text`, `cited_indices`, `error`)
+  instead of a tuple; infra failures raise a typed `LLMUnavailable(RuntimeError)` rather than
+  returning failure text through the answer channel, and the audit `log_event("SEARCH", ...)`
+  call gains a `details.outcome` field now, interim, until RYT-2 relocates emission into the
+  endpoint —
+  [DEC-0014](../../decisions/DEC-0014_insufficient-context-contract-finalized.md).
 
 ## Business Rules
 - No search history, no saved searches, no cross-patient analytics in this pass; single-patient
@@ -63,6 +71,10 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 | 2026-09-02 | [Streaming vs. post-validation wait](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md) | unresolved | |
 | 2026-09-02 | [Source display breadth](../../decisions/DEC-0009_source-display-breadth.md) | unresolved | |
 | 2026-09-02 | [Scope boundaries for search v1](../../decisions/DEC-0010_scope-boundaries-search-v1.md) | rejected | |
+| 2026-09-05 | [Insufficient-context detection: real-failure carve-out and heuristic validation (Q6/Q7)](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| 2026-09-05 | [Citation-validity check and generate_answer contract-change ownership (Q8/Q9)](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| 2026-09-05 | [Failure-exception typing and audit-event ownership (Q10/Q11)](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md) | unresolved | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| 2026-09-05 | [Insufficient-context contract finalized: LLMUnavailable typing and audit outcome ownership (Q10/Q11)](../../decisions/DEC-0014_insufficient-context-contract-finalized.md) | decided | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
 
 ## Evidence
 - [DEC-0001](../../decisions/DEC-0001_search-endpoint-before-ui.md)
@@ -75,6 +87,10 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
 - [DEC-0008](../../decisions/DEC-0008_streaming-vs-post-validation-wait.md)
 - [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md)
 - [DEC-0010](../../decisions/DEC-0010_scope-boundaries-search-v1.md)
+- [DEC-0011](../../decisions/DEC-0011_insufficient-context-detection-open-questions.md)
+- [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md)
+- [DEC-0013](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md)
+- [DEC-0014](../../decisions/DEC-0014_insufficient-context-contract-finalized.md)
 
 ## Open Questions
 - Is `clinician-search-answers` the right feature request for this work, or does it belong to an
@@ -98,7 +114,26 @@ role-scoped retrieval, and an answer with sourced citations — [DEC-0001](../..
   [DEC-0009](../../decisions/DEC-0009_source-display-breadth.md).
 
 **Resolved:**
-- Nothing recorded yet.
+- ~~Whether `generate_answer`'s infra-failure path should raise the bare underlying exception or a
+  typed exception class RYT-2 can catch specifically, and whether RYT-5 updates the existing
+  `log_event` call at `ui/search_page.py:189` with the new `outcome` field now or defers that
+  entirely to RYT-2's endpoint.~~ → resolved by
+  [DEC-0014](../../decisions/DEC-0014_insufficient-context-contract-finalized.md): a typed
+  `LLMUnavailable(RuntimeError)`, and RYT-5 adds `details.outcome` at the current call site now,
+  interim.
+- ~~Whether validating the `cited_indices == []` insufficient-context heuristic against
+  `evaluation/test_dataset.json` blocks ticket completion, and whether `generate_answer`'s return
+  contract needs to change to structurally distinguish a real failure from genuine
+  insufficient-context.~~ → resolved by
+  [DEC-0012](../../decisions/DEC-0012_citation-validity-and-contract-change-ownership.md): not
+  blocking (replaced with a unit-test AC), and yes, the contract must change.
+- ~~Whether this ticket's classifier or a future DEC-0008 leakage/citation-integrity check owns
+  citation-validity determination, and whether this ticket or RYT-2 implements the
+  `generate_answer` → `AnswerResult` contract change that acceptance criterion 4 depends on.~~ →
+  resolved by
+  [DEC-0013](../../decisions/DEC-0013_failure-exception-typing-and-audit-event-ownership.md): the
+  future DEC-0008 integrity check owns citation validity, and RYT-5 (not RYT-2) implements the
+  contract change.
 
 ## Risks / Rejected Approaches
 - Rendering role-filtered-out results with no disclosure risks a clinician believing they have
