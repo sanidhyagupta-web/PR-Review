@@ -1,0 +1,16 @@
+# Decisions — Healthcare Ingestion Pipeline
+
+Last updated: 2026-09-05
+
+| ID | Date | Title | Type | Feature Request | Ticket |
+|---|---|---|---|---|---|
+| [DEC-0001](DEC-0001_search-endpoint-before-ui.md) | 2026-09-02 | Search endpoint before UI | decided | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-2/dec-0001-search-endpoint-before-ui) |
+| [DEC-0002](DEC-0002_role-from-session-reject-body-role.md) | 2026-09-02 | Role from session; reject role in request body | decided | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-3/dec-0002-role-from-session-reject-role-in-request-body) |
+| [DEC-0003](DEC-0003_citations-as-expandable-source-cards.md) | 2026-09-02 | Citations as expandable source cards | decided | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-4/dec-0003-citations-as-expandable-source-cards) |
+| [DEC-0004](DEC-0004_insufficient-context-is-its-own-state.md) | 2026-09-02 | Insufficient context is its own UI state | decided | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-5/dec-0004-insufficient-context-is-its-own-ui-state) |
+| [DEC-0005](DEC-0005_audit-event-query-text-logging.md) | 2026-09-02 | Audit event query-text logging | unresolved | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-6/dec-0005-audit-event-query-text-logging) |
+| [DEC-0006](DEC-0006_disclose-role-filtered-result-counts.md) | 2026-09-02 | Disclosing role-filtered result counts | unresolved | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-7/dec-0006-disclosing-role-filtered-result-counts) |
+| [DEC-0007](DEC-0007_per-search-feedback.md) | 2026-09-02 | Per-search feedback (thumbs + optional reason) | decided | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-8/dec-0007-per-search-feedback-thumbs-optional-reason) |
+| [DEC-0008](DEC-0008_streaming-vs-post-validation-wait.md) | 2026-09-02 | Streaming vs. post-validation wait | unresolved | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-9/dec-0008-streaming-vs-post-validation-wait) |
+| [DEC-0009](DEC-0009_source-display-breadth.md) | 2026-09-02 | Source display breadth | unresolved | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-10/dec-0009-source-display-breadth) |
+| [DEC-0010](DEC-0010_scope-boundaries-search-v1.md) | 2026-09-02 | Scope boundaries for search v1 | rejected | [clinician-search-answers](../feature-requests/clinician-search-answers/feature-request.md) | [Linear](https://linear.app/flightdecktest-2/issue/RYT-11/dec-0010-scope-boundaries-for-search-v1) |

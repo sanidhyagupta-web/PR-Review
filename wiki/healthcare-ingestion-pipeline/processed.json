@@ -1,0 +1,19 @@
+{
+  "meeting-1mzUHFjWDrGKYmESQM5TC-ZV75BaVdoRvp4C1I2BP1h4-2026-09-05T08-35-54-082Z": {
+    "status": "done",
+    "processed_at": "2026-09-05T08:35:54.082Z",
+    "decisions_written": [
+      "DEC-0001",
+      "DEC-0002",
+      "DEC-0003",
+      "DEC-0004",
+      "DEC-0005",
+      "DEC-0006",
+      "DEC-0007",
+      "DEC-0008",
+      "DEC-0009",
+      "DEC-0010"
+    ],
+    "feature_requests_touched": ["clinician-search-answers"]
+  }
+}
