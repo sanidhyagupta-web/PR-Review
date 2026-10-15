@@ -20,7 +20,7 @@ tags: [chunking, embeddings, vector-search, keyword-search]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none) | `ingestion/chunking/`, `workers/{chunking,embedding,keyword_index}_worker.py`, `indexing/` | retrieval-indexing | 2026-09-05 |
+| backend-service | (none) | `ingestion/chunking/`, `workers/{chunking,embedding,keyword_index}_worker.py`, `indexing/` | retrieval-indexing | 2026-10-15 |
 
 ## Domain Purpose
 
@@ -103,7 +103,14 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 
 ## Testing Expectations
 
-- No dedicated test files found for chunking, embedding, or indexing logic in `tests/unit/`.
+- `tests/unit/test_chunk_hasher.py` covers `chunk_hasher.compute_hash`: determinism across
+  repeated calls, 64-character lowercase hex output shape, an explicit `hashlib.sha256`
+  known-value check, case/whitespace normalization equivalence (leading/trailing whitespace,
+  and runs of spaces, tabs, and newlines collapsed internally), word/punctuation distinction,
+  empty and whitespace-only input (both hash to the digest of `b""`), and non-ASCII (UTF-8,
+  e.g. `Café`) input.
+- No dedicated test files found for the chunker strategies (`semantic_chunker.py`,
+  `entity_preserving_chunker.py`), embedding, or indexing logic in `tests/unit/`.
   *(Open question: is this covered by an integration/eval harness under `AiHarness/evals/` instead
   of `pytest`?)*
 
