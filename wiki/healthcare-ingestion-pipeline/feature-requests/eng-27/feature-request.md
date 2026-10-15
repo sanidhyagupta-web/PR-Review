@@ -28,11 +28,13 @@ Add `tests/unit/test_chunk_hasher.py`, in the style of the existing files in `te
 
 Work-Type: Tech-Debt
 
-Add focused unit coverage for `ingestion.chunking.chunk_hasher.compute_hash` so its current normalization and SHA-256 behavior are protected against regressions.
+Add focused unit coverage for `ingestion.chunking.chunk_hasher.compute_hash` so its current whitespace normalization, lower-casing, UTF-8 encoding, and SHA-256 behavior are protected against regressions.
 
 ### Context
 
-[`ingestion/chunking/chunk_hasher.py`](<https://github.com/sanidhyagupta-web/PR-Review/blob/main/ingestion/chunking/chunk_hasher.py>) has one public function, `compute_hash(text)`. It collapses whitespace runs to one space, trims, lower-cases, and returns the SHA-256 hex digest. Both chunkers use it to detect duplicate chunks (`semantic_chunker.py`, `entity_preserving_chunker.py`), so a change to the normalisation silently changes which chunks count as duplicates. It has no tests.
+[`ingestion/chunking/chunk_hasher.py`](<https://github.com/sanidhyagupta-web/PR-Review/blob/main/ingestion/chunking/chunk_hasher.py>) has one public function, `compute_hash(text)`. It collapses whitespace runs to one space, trims, lower-cases, UTF-8 encodes the result, and returns its SHA-256 hexadecimal digest.
+
+`semantic_chunker.py` and `entity_preserving_chunker.py` assign this hash to created chunks. The active `ChunkingWorker` passes those hashes to `register_chunk`, and the unique `chunk_registry.chunk_hash` field is the sole deduplication mechanism. A normalization change can therefore silently change which chunks count as duplicates. No existing test file directly targets `chunk_hasher`.
 
 The impact is regression risk in duplicate-chunk identification: an untested normalization change can silently alter which chunks share a hash.
 
@@ -42,52 +44,58 @@ The impact is regression risk in duplicate-chunk identification: an untested nor
 
 ### Error Paths
 
-No production error behavior is being added or changed. The test suite must cover the edge cases specified below, including empty, whitespace-only, and non-ASCII string input.
+No production error behavior is being added or changed. The test suite must cover the specified edge cases, including empty, whitespace-only, and non-ASCII string input.
 
 ### Acceptance Criteria
 
-* Given the same text on repeated calls, when `compute_hash` is called, then it returns the same digest each time.
-* Given a string input, when `compute_hash` returns, then the result is the SHA-256 digest represented as exactly 64 lower-case hexadecimal characters.
-* Given two texts differing only in letter case, when each is hashed, then their hashes are equal.
-* Given two texts differing only in leading or trailing whitespace, when each is hashed, then their hashes are equal.
-* Given two texts differing only in the amount or kind of whitespace between words—including spaces, tabs, and newlines—when each is hashed, then their hashes are equal.
-* Given two texts differing in a word, when each is hashed, then their hashes are different.
-* Given two texts differing in punctuation, when each is hashed, then their hashes are different.
-* Given an empty string and a whitespace-only string, when each is hashed, then both return the SHA-256 hex digest of the empty string.
-* Given non-ASCII text such as `"Café"`, when it is hashed, then hashing succeeds and the returned value matches the SHA-256 digest of its normalized UTF-8 text.
-* `pytest tests/unit/test_chunk_hasher.py` passes.
-* The new tests import nothing outside the standard library, `pytest`, and `ingestion.chunking.chunk_hasher`.
+ 1. Given the same text on repeated calls, when `compute_hash` is called, then it returns the same digest each time.
+ 2. Given a string input, when `compute_hash` returns, then the result is exactly 64 lower-case hexadecimal characters.
+ 3. Given a string input, when `compute_hash` returns, then the value is the SHA-256 digest of the normalized text encoded as UTF-8.
+ 4. Given two texts differing only in letter case, when each is hashed, then their hashes are equal.
+ 5. Given two texts differing only in leading or trailing whitespace, when each is hashed, then their hashes are equal.
+ 6. Given two texts differing only in the amount or kind of whitespace between words—including spaces, tabs, and newlines—when each is hashed, then their hashes are equal.
+ 7. Given two texts differing in a word, when each is hashed, then their hashes are different.
+ 8. Given two texts differing in punctuation, when each is hashed, then their hashes are different.
+ 9. Given an empty string and a whitespace-only string, when each is hashed, then both return the SHA-256 hexadecimal digest of the empty string.
+10. Given non-ASCII text such as `"Café"`, when it is hashed, then hashing succeeds and the returned value matches the SHA-256 digest of its normalized UTF-8 text.
+11. `pytest tests/unit/test_chunk_hasher.py` passes.
+12. The new test file imports nothing outside the standard library, `pytest`, and `ingestion.chunking.chunk_hasher`.
 
 ### Existing System Behaviour
 
 `ingestion/chunking/chunk_hasher.py` currently normalizes with `re.sub(r"\s+", " ", text).strip().lower()`, UTF-8 encodes the normalized text, and returns `hashlib.sha256(...).hexdigest()`.
 
-`ingestion/chunking/semantic_chunker.py` and `ingestion/chunking/entity_preserving_chunker.py` both call `compute_hash` when creating chunks. No existing test file targets `chunk_hasher`.
+`ingestion/chunking/semantic_chunker.py` and `ingestion/chunking/entity_preserving_chunker.py` both call `compute_hash` when creating chunks. `workers/chunking_worker.py` uses each resulting `chunk_hash` when registering chunks, and `db/models.py` makes `chunk_registry.chunk_hash` unique. No existing test file targets `chunk_hasher`.
 
 ### Scope Boundaries
 
 * Add `tests/unit/test_chunk_hasher.py` in the style of the existing Python tests under `tests/unit/`.
-* Do not change `ingestion/chunking/chunk_hasher.py` or either consuming chunker.
+* Do not change `ingestion/chunking/chunk_hasher.py`, either consuming chunker, production deduplication code, or schemas.
 * Test the public `compute_hash(text: str)` contract; unsupported non-string inputs are outside scope.
 * Do not add dependencies beyond the standard library, `pytest`, and the module under test.
-* *Migration and data rollback are not applicable: this change adds tests only and touches no runtime state or schema. Reverting the added test file restores the prior repository state.*
+* Migration and data rollback are not applicable because this change adds tests only and touches no runtime state or schema. Reverting the added test file restores the prior repository state.
 
 ### Reference Documents
 
+* `code-wiki/healthcare-ingestion-pipeline/Features/Feat-0002-chunking-embedding-indexing/Index.md`
+* `wiki/healthcare-ingestion-pipeline/feature-requests/eng-27/feature-request.md`
 * `ingestion/chunking/chunk_hasher.py`
 * `ingestion/chunking/semantic_chunker.py`
 * `ingestion/chunking/entity_preserving_chunker.py`
+* `workers/chunking_worker.py`
+* `ingestion/registry.py`
+* `db/models.py`
 * `tests/unit/test_bulk_ingestion.py`
 * `tests/unit/test_researcher_role.py`
 * `tests/unit/test_dicom_parser.py`
-* `.claude/rules/testing-standards.md`
-* `.claude/rules/backend-testing.md`
-
-No relevant `code-wiki` feature page or project-wiki request/decision was found in the checkout.
+* `.claude/skills/backend-test/SKILL.md`
+* `.claude/skills/post-checks/SKILL.md`
+* `conftest.py`
+* `requirements.txt`
 
 ### Round log
 
-* Round 1, aligned: classified as test-focused tech debt; verified the implementation, consumers, missing direct tests, and existing unit-test conventions; made the test-only scope, impact, non-ASCII assertion, and non-applicable migration explicit.
+* Round 1, aligned: classified as test-focused tech debt; verified the implementation, consumers, actual deduplication path, missing direct tests, pytest setup, and unit-test conventions; corrected stale documentation references and clarified that chunkers assign hashes while the worker and registry perform duplicate detection.
 
 ## Business Rules
 
