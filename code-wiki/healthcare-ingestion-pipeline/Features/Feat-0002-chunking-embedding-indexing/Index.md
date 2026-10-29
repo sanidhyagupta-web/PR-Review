@@ -69,7 +69,7 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 | BR-06 | Reranking uses `cross-encoder/ms-marco-MiniLM-L-6-v2` over (query, chunk) pairs | `indexing/reranker.py:11-48` | MEDIUM |
 | BR-07 | BM25 keyword index is in-process, rebuilt after every chunk upsert, persisted to `bm25_index.json` | `indexing/opensearch_index.py:50-118` | MEDIUM |
 | BR-08 | Chroma metadata values are coerced to primitive types before storage (lists → comma string, `None` → `""`) | `indexing/chroma_store.py:_sanitise_metadata()` | LOW |
-| BR-09 | Chunk hash is the SHA-256 hex digest of the UTF-8 text after whitespace runs collapse to one space, ends are trimmed and case is lower-cased; empty and whitespace-only text hash to the SHA-256 of the empty string. Word or punctuation changes change the hash | `ingestion/chunking/chunk_hasher.py:5-11`, pinned by `tests/unit/test_chunk_hasher.py` | HIGH |
+| BR-09 | Chunk hash is the SHA-256 hex digest of the UTF-8 text after whitespace runs collapse to one space, ends are trimmed and case is lower-cased; empty and whitespace-only text hash to the SHA-256 of the empty string. Word or punctuation changes change the hash | `ingestion/chunking/chunk_hasher.py:5-12`, pinned by `tests/unit/test_chunk_hasher.py` | HIGH |
 
 ## External Integrations
 
