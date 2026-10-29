@@ -20,14 +20,16 @@ tags: [chunking, embeddings, vector-search, keyword-search]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none) | `ingestion/chunking/`, `workers/{chunking,embedding,keyword_index}_worker.py`, `indexing/` | retrieval-indexing | 2026-09-05 |
+| backend-service | (none) | `ingestion/chunking/`, `workers/{chunking,embedding,keyword_index}_worker.py`, `indexing/` | retrieval-indexing | 2026-10-29 |
 
 ## Domain Purpose
 
 Turns markdown-formatted document text into retrievable chunks: splits text so medical entities
 (medication + dosage + frequency) are never separated, deduplicates identical chunks, embeds
 them for vector search, and indexes them for keyword (BM25) search — the two retrieval paths
-that Feat-0005's search pipeline queries.
+that Feat-0005's search pipeline queries. Because chunk identity is a content hash, a silent
+change to how text is normalised before hashing would change which chunks count as duplicates,
+so that behaviour is pinned by regression tests.
 
 ## Entities Owned
 
@@ -67,6 +69,7 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 | BR-06 | Reranking uses `cross-encoder/ms-marco-MiniLM-L-6-v2` over (query, chunk) pairs | `indexing/reranker.py:11-48` | MEDIUM |
 | BR-07 | BM25 keyword index is in-process, rebuilt after every chunk upsert, persisted to `bm25_index.json` | `indexing/opensearch_index.py:50-118` | MEDIUM |
 | BR-08 | Chroma metadata values are coerced to primitive types before storage (lists → comma string, `None` → `""`) | `indexing/chroma_store.py:_sanitise_metadata()` | LOW |
+| BR-09 | Chunk hash is the SHA-256 hex digest of the UTF-8 text after whitespace runs collapse to one space, ends are trimmed and case is lower-cased; empty and whitespace-only text hash to the SHA-256 of the empty string. Word or punctuation changes change the hash | `ingestion/chunking/chunk_hasher.py:5-11`, pinned by `tests/unit/test_chunk_hasher.py` | HIGH |
 
 ## External Integrations
 
@@ -88,7 +91,7 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 | Change | Risk | Why |
 |---|---|---|
 | Editing `entity_preserving_chunker.py`'s entity regex patterns | Silent chunk-boundary regressions | These patterns are what keeps medication/dosage/frequency atomic — a regression here is invisible until a query returns a truncated drug instruction |
-| Changing `chunk_hash` computation | Breaks dedup silently | Existing rows in `chunk_registry` would no longer match newly computed hashes for the same text |
+| Changing `chunk_hash` computation | Breaks dedup silently | Existing rows in `chunk_registry` would no longer match newly computed hashes for the same text; `tests/unit/test_chunk_hasher.py` will fail and must only be updated deliberately |
 
 ### Human Escalation Required
 - None specific to this feature beyond the general RBAC/PHI concerns owned by Feat-0004/Feat-0005.
@@ -103,7 +106,12 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 
 ## Testing Expectations
 
-- No dedicated test files found for chunking, embedding, or indexing logic in `tests/unit/`.
+- `tests/unit/test_chunk_hasher.py` covers `compute_hash` through the public function only:
+  determinism, 64 lower-case hex digest, equality with a `hashlib` SHA-256 oracle built from
+  explicit normalised strings, case/leading/trailing/inter-word whitespace equivalence, word and
+  punctuation inequality, empty/whitespace-only input, and non-ASCII (UTF-8) input. It imports only
+  the standard library, `pytest` and the hasher; keep it free of chunker/DB imports.
+- No dedicated test files found for the chunkers, embedding, or indexing logic in `tests/unit/`.
   *(Open question: is this covered by an integration/eval harness under `AiHarness/evals/` instead
   of `pytest`?)*
 
@@ -122,6 +130,7 @@ values, so `allowed_roles` (a list) is coerced to a comma-delimited string befor
 
 - `ingestion/chunking/entity_preserving_chunker.py` — the active chunking strategy (entity tagging, greedy packing, min-chunk merge)
 - `ingestion/chunking/chunk_hasher.py` — SHA-256 hash + text normalization for dedup
+- `tests/unit/test_chunk_hasher.py` — regression tests pinning the hash contract
 - `ingestion/chunking/semantic_chunker.py` — an alternate chunker, **not imported by `ChunkingWorker`** (see open question)
 - `workers/chunking_worker.py`, `workers/embedding_worker.py`, `workers/keyword_index_worker.py`
 - `indexing/embeddings.py`, `indexing/chroma_store.py`, `indexing/opensearch_index.py`, `indexing/reranker.py`, `indexing/index_schema.py`, `indexing/pii_entity_index.py`
