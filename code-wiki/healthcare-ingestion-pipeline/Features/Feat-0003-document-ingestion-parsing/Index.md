@@ -39,6 +39,9 @@ including clinicians' Markdown note exports, which are read as plain text), vali
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
 clean, structured text instead of raw file bytes.
 
+Scanned-page OCR text is also spell-corrected for medical terms, and operators can tell from the
+debug log whether the offline (regex) correction path changed anything, not only the Sapling one.
+
 ## Entities Owned
 
 | Entity | Represents |
@@ -107,6 +110,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | BR-08 | Bulk ingest accepts at most 50 files per request | `app/main.py:171-172` | MEDIUM |
 | BR-09 | `.md` is ingested exactly like `.txt`: `detect_doc_type` returns `"text"` (case-insensitive), so `ParserWorker` uses `parse_text_file` — Markdown syntax is preserved, never parsed or rendered. The detector's unsupported-extension error lists `.md` among accepted extensions | `ingestion/parsers/doc_type_detector.py:67-68,70-73`, `workers/parser_worker.py:84-87` | HIGH |
 | BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:68-97`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
+| BR-11 | OCR medical-term correction (`correct_medical_terms`): the regex fallback (no Sapling key, or Sapling raised `requests.RequestException`) counts replacement *occurrences* via `re.subn` across all `_CORRECTIONS` entries and emits exactly one debug message `Regex fallback corrected %d term(s) in OCR text` per call, only when the total is positive. The message carries no OCR text or terms. Substitution semantics (case-insensitive, whole-word, dict order) and the Sapling path/warning are unchanged | `ingestion/ocr/ocr_quality.py:67-77` | LOW |
 
 ## External Integrations
 
@@ -155,7 +159,8 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 - `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, and a source-level check of both pickers' `type` lists.
 - `tests/unit/test_dicom_parser.py` covers `detect_doc_type` (including `.md`/`.MD`, the accepted-extension error list, `.markdown` rejection) and `ParserWorker` routing `.txt`/`.md` through the real detector and text parser.
-- `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
+- `tests/unit/test_ocr_quality.py` covers the `correct_medical_terms` regex fallback (BR-11) with the Sapling key cleared and `caplog`: single/repeated/multi-entry counts, case, word boundaries, zero and empty input, per-call reset. Sapling success and `RequestException` paths have no tests.
+- `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or the OCR confidence gate (`is_quality_sufficient`) — *Open question: are these covered elsewhere or genuinely untested?*
 
 ## Forbidden Patterns
 
