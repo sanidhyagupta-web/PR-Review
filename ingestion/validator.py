@@ -7,7 +7,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # Extensions accepted by the bulk (and future single-file) ingest endpoint.
-SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".txt", ".text", ".dcm"})
+SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".txt", ".text", ".md", ".dcm"})
 
 _DICOM_PREAMBLE_LEN = 128
 _DICOM_MAGIC = b"DICM"
