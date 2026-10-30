@@ -35,7 +35,7 @@ tags: [ingestion, pipeline-entrypoint, pdf, dicom, ocr]
 ## Domain Purpose
 
 The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text,
-including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed (a file whose bytes contradict its extension is rejected up front with a reason the uploader sees, rather than failing later inside the parser), stores the raw bytes encrypted in S3, and converts it
+including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed (bulk uploads named `.pdf` that lack the `%PDF` prefix are rejected up front with a reason the uploader sees, rather than failing later inside the parser), stores the raw bytes encrypted in S3, and converts it
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
 clean, structured text instead of raw file bytes.
 
@@ -146,7 +146,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | Scenario | Error Returned | Root Cause |
 |---|---|---|
 | Unsupported/dangerous file | Rejected, reason string | `ingestion/validator.py` extension/magic-byte check |
-| `.pdf` whose bytes are not a PDF (e.g. renamed text) | Rejected, `"PDF magic bytes not found"` — returned by `_process_single_upload_bytes` before S3 upload/registration/queueing | `ingestion/validator.py:59-60` |
+| Bulk upload with a supported `.pdf` filename (any case) whose content lacks the exact `%PDF` prefix, after the empty/size/executable guards pass (e.g. renamed text); content that starts with `%PDF` passes even if malformed | Rejected, `"PDF magic bytes not found"` — returned by `_process_single_upload_bytes` before S3 upload/registration/queueing | `ingestion/validator.py:59-60` |
 | Duplicate filename | Rejected, `"Duplicate document"` | `is_duplicate_document()` |
 | S3 credentials expired | `ValueError` with `aws sso login` instructions | `TokenRetrievalError`/`NoCredentialsError` (`app/main.py:65-69`) |
 | OCR quality too low | Document `FAILED`, sent to DLQ | `avg_confidence < 0.40` |
