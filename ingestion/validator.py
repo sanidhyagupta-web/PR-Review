@@ -56,6 +56,9 @@ class DocumentValidator:
             if content[:len(dangerous)] == dangerous:
                 return False, "Executable/malicious file type rejected"
 
+        if ext == ".pdf" and not content.startswith(_PDF_MAGIC):
+            return False, "PDF magic bytes not found"
+
         if ext == ".dcm":
             if len(content) < _DICOM_PREAMBLE_LEN + 4:
                 return False, "File too small to be a valid DICOM"
