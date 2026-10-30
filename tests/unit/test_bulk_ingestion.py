@@ -384,6 +384,90 @@ class TestDocumentValidator:
         assert not ok
         assert reason == expected
 
+    @pytest.mark.parametrize("filename", ["report.pdf", "REPORT.PDF", "Report.Pdf"])
+    @pytest.mark.parametrize("content", [b"%PDF", _PDF_BYTES, b"%PDF-1.7\n" + b"\x00\xff" * 8])
+    def test_pdf_prefix_accepted(self, filename, content):
+        from ingestion.validator import DocumentValidator
+        assert DocumentValidator().validate(filename, content) == (True, "")
+
+    @pytest.mark.parametrize("filename", ["report.pdf", "REPORT.PDF"])
+    @pytest.mark.parametrize(
+        "content",
+        [
+            b"ordinary text",
+            b"%PD",
+            b"%pdf-1.4 lowercase",
+            b" %PDF-1.4 leading space",
+            b"\n%PDF-1.4 leading newline",
+            b"\xef\xbb\xbf%PDF-1.4 bom",
+            b"x" * 20 + b"%PDF",
+        ],
+    )
+    def test_pdf_without_prefix_rejected(self, filename, content):
+        from ingestion.validator import DocumentValidator
+        assert DocumentValidator().validate(filename, content) == (
+            False,
+            "PDF magic bytes not found",
+        )
+
+    def test_pdf_empty_reports_empty_not_prefix(self):
+        from ingestion.validator import DocumentValidator
+        assert DocumentValidator().validate("report.pdf", b"") == (False, "File is empty")
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            b"MZ" + b"x" * 20,
+            b"\x7fELF" + b"x" * 20,
+            b"#!/bin/sh\necho hi\n",
+        ],
+    )
+    def test_pdf_executable_header_takes_precedence_over_prefix(self, content):
+        from ingestion.validator import DocumentValidator
+        assert DocumentValidator().validate("report.pdf", content) == (
+            False,
+            "Executable/malicious file type rejected",
+        )
+
+    @pytest.mark.parametrize(
+        "content",
+        [b"%PDF" + b"x" * 40, b"MZ" + b"x" * 40, b"ordinary text" + b"x" * 40],
+    )
+    def test_pdf_oversized_keeps_size_reason(self, monkeypatch, content):
+        from ingestion.validator import DocumentValidator
+        from app import config as _cfg
+        monkeypatch.setattr(_cfg.settings, "max_file_size_bytes", 10)
+        assert DocumentValidator().validate("big.pdf", content) == (
+            False,
+            "File exceeds 0 MB limit",
+        )
+
+    def test_pdf_exactly_at_size_limit_with_prefix_accepted(self, monkeypatch):
+        from ingestion.validator import DocumentValidator
+        from app import config as _cfg
+        monkeypatch.setattr(_cfg.settings, "max_file_size_bytes", 10)
+        assert DocumentValidator().validate("edge.pdf", b"%PDF" + b"x" * 6) == (True, "")
+
+    def test_pdf_exactly_at_size_limit_without_prefix_rejected(self, monkeypatch):
+        from ingestion.validator import DocumentValidator
+        from app import config as _cfg
+        monkeypatch.setattr(_cfg.settings, "max_file_size_bytes", 10)
+        assert DocumentValidator().validate("edge.pdf", b"x" * 10) == (
+            False,
+            "PDF magic bytes not found",
+        )
+
+    def test_unsupported_extension_precedes_pdf_prefix_check(self):
+        from ingestion.validator import DocumentValidator
+        ok, reason = DocumentValidator().validate("report.pdfx", b"ordinary text")
+        assert not ok
+        assert reason == "Unsupported file type: '.pdfx'"
+
+    @pytest.mark.parametrize("filename", ["notes.txt", "notes.md"])
+    def test_non_pdf_extensions_do_not_require_pdf_prefix(self, filename):
+        from ingestion.validator import DocumentValidator
+        assert DocumentValidator().validate(filename, b"ordinary text") == (True, "")
+
     @pytest.mark.parametrize("ext", [".txt", ".md", ".MD"])
     def test_text_oversized_rejected(self, monkeypatch, ext):
         from ingestion.validator import DocumentValidator
