@@ -30,12 +30,12 @@ tags: [ingestion, pipeline-entrypoint, pdf, dicom, ocr]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-10-30 |
+| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-10-31 |
 
 ## Domain Purpose
 
 The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text,
-including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed, stores the raw bytes encrypted in S3, and converts it
+including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed (a file whose bytes contradict its extension is rejected up front with a reason the uploader sees, rather than failing later inside the parser), stores the raw bytes encrypted in S3, and converts it
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
 clean, structured text instead of raw file bytes.
 
@@ -97,16 +97,17 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 | ID | Rule | Enforced In | Severity |
 |---|---|---|---|
-| BR-01 | Bulk path (`DocumentValidator`): extension (lowercased, so `.MD` = `.md`) must be one of `.pdf`, `.txt`, `.text`, `.md`, `.dcm`; unsupported types (including `.markdown`) rejected with the unchanged reason `Unsupported file type: '<ext>'`; executables (PE/ELF/shebang magic bytes) rejected | `ingestion/validator.py:10,44-45,55-57` | CRITICAL |
+| BR-01 | Bulk path (`DocumentValidator`): extension (lowercased, so `.MD` = `.md`) must be one of `.pdf`, `.txt`, `.text`, `.md`, `.dcm`; unsupported types (including `.markdown`) rejected with the unchanged reason `Unsupported file type: '<ext>'`; executables (PE/ELF/shebang magic bytes) rejected | `ingestion/validator.py:10,43-45,55-57` | CRITICAL |
 | BR-02 | File size ≤ 50 MB | `app/config.py:30` | HIGH |
-| BR-03 | `.dcm` files must have a valid DICOM preamble/magic bytes | `ingestion/validator.py:59-63`, `ingestion/parsers/doc_type_detector.py:49-58` | HIGH |
+| BR-03 | `.dcm` files must have a valid DICOM preamble/magic bytes | `ingestion/validator.py:62-66`, `ingestion/parsers/doc_type_detector.py:49-58` | HIGH |
 | BR-04 | Duplicate filename (non-failed, non-duplicate existing doc) is rejected | `app/main.py:116-117`, `ingestion/registry.py:70-82` | MEDIUM |
 | BR-05 | OCR average confidence < 0.40 (configurable) → document FAILED, sent to DLQ | `ingestion/ocr/ocr_quality.py:26-33`, `workers/parser_worker.py:64-78` | HIGH |
 | BR-06 | Department must be a known value (`general`/`cardiology`/`billing`/`radiology`/`oncology`) or ingest raises `ValueError` | `ingestion/metadata/rbac_policy.py:21-31` (owned by Feat-0004) | HIGH |
 | BR-07 | Only `doctor`/`nurse`/`admin` may submit ingest jobs — see Access Control gap above | `app/main.py:168` | CRITICAL |
 | BR-08 | Bulk ingest accepts at most 50 files per request | `app/main.py:171-172` | MEDIUM |
 | BR-09 | `.md` is ingested exactly like `.txt`: `detect_doc_type` returns `"text"` (case-insensitive), so `ParserWorker` uses `parse_text_file` — Markdown syntax is preserved, never parsed or rendered. The detector's unsupported-extension error lists `.md` among accepted extensions | `ingestion/parsers/doc_type_detector.py:67-68,70-73`, `workers/parser_worker.py:84-87` | HIGH |
-| BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:68-97`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
+| BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:71-100`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
+| BR-11 | Bulk path: a `.pdf` (extension lowercased) must start with the exact, case-sensitive bytes `%PDF` (`_PDF_MAGIC`, offset 0), else `(False, "PDF magic bytes not found")`. Prefix check only — not structural validation, so `%PDF` alone passes. Check order is fixed: unsupported extension → empty → size → executable header → PDF prefix, so earlier reasons (including oversized `MZ` content → size reason) win. Does not apply to `validate_file` (BR-10) | `ingestion/validator.py:59-60` (order: `43-57`) | HIGH |
 
 ## External Integrations
 
@@ -145,6 +146,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | Scenario | Error Returned | Root Cause |
 |---|---|---|
 | Unsupported/dangerous file | Rejected, reason string | `ingestion/validator.py` extension/magic-byte check |
+| `.pdf` whose bytes are not a PDF (e.g. renamed text) | Rejected, `"PDF magic bytes not found"` — returned by `_process_single_upload_bytes` before S3 upload/registration/queueing | `ingestion/validator.py:59-60` |
 | Duplicate filename | Rejected, `"Duplicate document"` | `is_duplicate_document()` |
 | S3 credentials expired | `ValueError` with `aws sso login` instructions | `TokenRetrievalError`/`NoCredentialsError` (`app/main.py:65-69`) |
 | OCR quality too low | Document `FAILED`, sent to DLQ | `avg_confidence < 0.40` |
@@ -153,7 +155,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 ## Testing Expectations
 
-- `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, and a source-level check of both pickers' `type` lists.
+- `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, `.pdf`/`.PDF` `%PDF`-prefix acceptance and rejection with the fixed check-order precedence (empty, oversized incl. `MZ`, executable headers, unsupported extension; `settings.max_file_size_bytes` monkeypatched small), and a source-level check of both pickers' `type` lists.
 - `tests/unit/test_dicom_parser.py` covers `detect_doc_type` (including `.md`/`.MD`, the accepted-extension error list, `.markdown` rejection) and `ParserWorker` routing `.txt`/`.md` through the real detector and text parser.
 - `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
 
