@@ -30,12 +30,12 @@ tags: [ingestion, pipeline-entrypoint, pdf, dicom, ocr]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-09-05 |
+| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-10-30 |
 
 ## Domain Purpose
 
-The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text),
-validates it's safe and well-formed, stores the raw bytes encrypted in S3, and converts it
+The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text,
+including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed, stores the raw bytes encrypted in S3, and converts it
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
 clean, structured text instead of raw file bytes.
 
@@ -97,7 +97,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 | ID | Rule | Enforced In | Severity |
 |---|---|---|---|
-| BR-01 | File extension must be one of `.pdf`, `.txt`, `.text`, `.dcm`; executables (PE/ELF/shebang magic bytes) rejected | `ingestion/validator.py:10-20,55-57,88-90` | CRITICAL |
+| BR-01 | Bulk path (`DocumentValidator`): extension (lowercased, so `.MD` = `.md`) must be one of `.pdf`, `.txt`, `.text`, `.md`, `.dcm`; unsupported types (including `.markdown`) rejected with the unchanged reason `Unsupported file type: '<ext>'`; executables (PE/ELF/shebang magic bytes) rejected | `ingestion/validator.py:10,44-45,55-57` | CRITICAL |
 | BR-02 | File size ≤ 50 MB | `app/config.py:30` | HIGH |
 | BR-03 | `.dcm` files must have a valid DICOM preamble/magic bytes | `ingestion/validator.py:59-63`, `ingestion/parsers/doc_type_detector.py:49-58` | HIGH |
 | BR-04 | Duplicate filename (non-failed, non-duplicate existing doc) is rejected | `app/main.py:116-117`, `ingestion/registry.py:70-82` | MEDIUM |
@@ -105,6 +105,8 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | BR-06 | Department must be a known value (`general`/`cardiology`/`billing`/`radiology`/`oncology`) or ingest raises `ValueError` | `ingestion/metadata/rbac_policy.py:21-31` (owned by Feat-0004) | HIGH |
 | BR-07 | Only `doctor`/`nurse`/`admin` may submit ingest jobs — see Access Control gap above | `app/main.py:168` | CRITICAL |
 | BR-08 | Bulk ingest accepts at most 50 files per request | `app/main.py:171-172` | MEDIUM |
+| BR-09 | `.md` is ingested exactly like `.txt`: `detect_doc_type` returns `"text"` (case-insensitive), so `ParserWorker` uses `parse_text_file` — Markdown syntax is preserved, never parsed or rendered. The detector's unsupported-extension error lists `.md` among accepted extensions | `ingestion/parsers/doc_type_detector.py:67-68,70-73`, `workers/parser_worker.py:84-87` | HIGH |
+| BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:68-97`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
 
 ## External Integrations
 
@@ -125,7 +127,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 ## Safe vs Dangerous Changes
 
 ### Safe
-- Adding a new supported file extension to `ingestion/validator.py`'s allow-list, provided a matching parser/OCR path exists.
+- Adding a new supported file extension to `ingestion/validator.py`'s allow-list, provided a matching parser/OCR path exists. A new extension must also be added to `detect_doc_type` (otherwise `ParserWorker` fails after upload) and, if single upload should offer it, to `ui/upload_page.py`'s picker; the two validators and the two pickers are independent lists.
 - Raising/lowering `max_file_size_bytes` or `ocr_confidence_threshold` in `app/config.py`.
 
 ### Dangerous — Requires Review
@@ -151,8 +153,9 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 ## Testing Expectations
 
-- `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch).
-- No test coverage found for the `ingest_document()` single-file Python API path, the file watcher, or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
+- `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, and a source-level check of both pickers' `type` lists.
+- `tests/unit/test_dicom_parser.py` covers `detect_doc_type` (including `.md`/`.MD`, the accepted-extension error list, `.markdown` rejection) and `ParserWorker` routing `.txt`/`.md` through the real detector and text parser.
+- `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
 
 ## Forbidden Patterns
 

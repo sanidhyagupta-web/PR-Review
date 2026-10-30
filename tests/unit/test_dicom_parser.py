@@ -170,6 +170,24 @@ def test_raises_on_unsupported_extension():
         detect_doc_type("image.png")
 
 
+@pytest.mark.parametrize("filename", ["notes.md", "NOTES.MD", "Notes.Md"])
+def test_detects_md_case_insensitive(filename):
+    assert detect_doc_type(filename) == "text"
+
+
+def test_unsupported_error_lists_md():
+    with pytest.raises(ValueError, match="Accepted extensions") as exc_info:
+        detect_doc_type("image.png")
+    accepted = str(exc_info.value).split("Accepted extensions:")[1]
+    assert ".md" in [e.strip() for e in accepted.split(",")]
+
+
+@pytest.mark.parametrize("filename", ["notes.markdown", "NOTES.MARKDOWN"])
+def test_markdown_extension_rejected(filename):
+    with pytest.raises(ValueError, match="Unsupported file extension '.markdown'"):
+        detect_doc_type(filename)
+
+
 def test_dcm_magic_bytes_valid(ct_bytes):
     # A real DICOM file should pass magic byte validation
     result = detect_doc_type("scan.dcm", file_bytes=ct_bytes)
@@ -187,6 +205,60 @@ def test_dcm_no_magic_bytes_skips_validation():
     # When file_bytes not provided, magic check is skipped
     result = detect_doc_type("scan.dcm", file_bytes=None)
     assert result == "dicom"
+
+
+# ── ParserWorker: plain-text routing for .txt / .md ───────────────────────────
+
+@pytest.mark.parametrize("filename", ["notes.txt", "notes.md", "NOTES.MD"])
+def test_text_extensions_use_existing_worker_path(filename, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import queues
+    from ingestion.state_machine import DocStatus
+    from workers import parser_worker
+    from workers.parser_worker import ParserWorker
+
+    # Markdown syntax is preserved (no Markdown-aware parsing); surrounding
+    # whitespace is stripped and undecodable bytes are replaced, as for .txt.
+    raw = b"\n  # Visit note\n\n- **BP** normal \xff\n\n"
+    expected = "# Visit note\n\n- **BP** normal \ufffd"
+    raw_path = tmp_path / "downloaded"
+    raw_path.write_bytes(raw)
+
+    uploads = []
+    statuses = []
+    markdown_queue = MagicMock()
+    monkeypatch.setattr(parser_worker, "download_to_tempfile", lambda key, suffix="": str(raw_path))
+    monkeypatch.setattr(parser_worker, "upload", lambda key, text: uploads.append((key, text)))
+    monkeypatch.setattr(
+        parser_worker, "update_status", lambda doc_id, status, **kw: statuses.append((status, kw))
+    )
+    monkeypatch.setattr(queues, "markdown_queue", markdown_queue)
+
+    message = {
+        "doc_id": "doc-1",
+        "raw_s3_key": f"raw/doc-1/{filename}",
+        "file_suffix": Path(filename).suffix.lower(),
+        "original_filename": filename,
+        "uploader_id": "u1",
+        "patient_id": "P001",
+        "department": "general",
+        "retry_count": 0,
+    }
+    ParserWorker().process(message)
+
+    assert not raw_path.exists()  # temp file cleaned up
+    assert uploads == [("processed/doc-1/raw.txt", expected)]
+    assert statuses == [
+        (DocStatus.PARSING, {"file_type": "text"}),
+        (DocStatus.PARSED, {"file_type": "text"}),
+    ]
+    markdown_queue.put.assert_called_once_with({
+        **message,
+        "doc_type": "text",
+        "parsed_s3_key": "processed/doc-1/raw.txt",
+        "page_texts": [(1, expected)],
+    })
 
 
 # ── PII field presence (flows to PiiWorker) ────────────────────────────────────

@@ -11,7 +11,7 @@ Return values
 "pdf_typed"   — machine-readable PDF (default; ParserWorker downgrades to
                 "pdf_scanned" if text density is below the OCR threshold)
 "pdf_scanned" — image-only PDF, needs OCR
-"text"        — plain .txt / .text file
+"text"        — plain .txt / .text / .md file (Markdown is read as plain text)
 
 Raises ValueError for unsupported extensions.
 """
@@ -64,10 +64,10 @@ def detect_doc_type(filename: str, file_bytes: bytes | None = None) -> str:
         # the density is below settings.ocr_confidence_threshold.
         return "pdf_typed"
 
-    if ext in (".txt", ".text"):
+    if ext in (".txt", ".text", ".md"):
         return "text"
 
     raise ValueError(
         f"Unsupported file extension {ext!r} in {filename!r}. "
-        f"Accepted extensions: .dcm, .pdf, .txt, .text"
+        f"Accepted extensions: .dcm, .pdf, .txt, .text, .md"
     )

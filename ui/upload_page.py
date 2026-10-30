@@ -67,7 +67,7 @@ def render():
     with col1:
         uploaded = st.file_uploader(
             "Choose file(s)",
-            type=["pdf", "txt"],
+            type=["pdf", "txt", "md"],
             accept_multiple_files=True,
             help="Typed PDFs, scanned PDFs, or plain text clinical notes.",
         )
