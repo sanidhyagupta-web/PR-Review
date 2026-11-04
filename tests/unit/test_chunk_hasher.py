@@ -107,6 +107,12 @@ def test_whitespace_only_string_hashes_to_digest_of_empty_bytes():
     assert compute_hash("   \t\n  ") == expected
 
 
+def test_tab_only_string_hashes_to_digest_of_empty_bytes():
+    """A tab-only string hashes to the SHA-256 digest of empty bytes."""
+    expected = hashlib.sha256(b"").hexdigest()
+    assert compute_hash("\t\t") == expected
+
+
 # ── edge case: non-ASCII / UTF-8 input ──────────────────────────────────────
 
 def test_non_ascii_input_hashes_successfully():
