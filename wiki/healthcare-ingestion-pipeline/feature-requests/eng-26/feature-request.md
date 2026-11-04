@@ -34,7 +34,7 @@ Three packages the code imports directly are not listed in `requirements.txt`, s
 
 ### What to do
 
-Add the three packages to `requirements.txt` with a minimum version each, in the section that fits, in the file's existing style (one package per line, a short comment where it helps).
+Add the nine packages listed under Summary to `requirements.txt`, with the minimum versions given there, in the section that fits, in the file's existing style (one package per line, a short comment where it helps).
 
 ### Summary
 
@@ -64,8 +64,6 @@ Material impact:
 * Without `anthropic`, Claude answers on the search page and the Claude Vision OCR fallback are unavailable even when `ANTHROPIC_API_KEY` is configured. The code catches the import failure, so the feature degrades rather than reporting a missing package to the user.
 * The seven transitively installed packages are at risk if current providers change their dependency trees.
 * The PDF and text pipeline, Streamlit UI, and FastAPI app currently work. The repository has no deployment, so no deployed environment is affected.
-
-The repository has no `code-wiki/` or `wiki/` documentation.
 
 ### User Flow
 
@@ -147,8 +145,6 @@ Out of scope:
 * `storage/s3_client.py`
 * `workers/extraction_worker.py`
 * `tests/unit/test_dicom_parser.py`
-
-No repository `code-wiki/` or `wiki/` pages are present.
 
 ### Round log
 
