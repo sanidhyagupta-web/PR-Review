@@ -65,6 +65,14 @@ def correct_medical_terms(text: str) -> str:
             logger.warning("Sapling API unavailable (%s); falling back to regex", exc)
 
     # Regex fallback
+    total_replacements = 0
     for wrong, right in _CORRECTIONS.items():
-        text = re.sub(rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE)
+        text, count = re.subn(
+            rf"\b{re.escape(wrong)}\b", right, text, flags=re.IGNORECASE
+        )
+        total_replacements += count
+    if total_replacements:
+        logger.debug(
+            "Regex fallback corrected %d term(s) in OCR text", total_replacements
+        )
     return text
