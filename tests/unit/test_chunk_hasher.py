@@ -76,6 +76,11 @@ def test_internal_whitespace_variants_hash_equal(variant):
     assert compute_hash(variant) == compute_hash("chest pain")
 
 
+def test_non_breaking_space_between_words_hashes_equal_to_normal_space():
+    """A non-breaking space between words normalizes to a normal space."""
+    assert compute_hash("chest\u00a0pain") == compute_hash("chest pain")
+
+
 # ── distinction: meaningful content changes ─────────────────────────────────
 
 def test_different_word_hashes_differ():
