@@ -58,10 +58,13 @@ def recover_stuck_docs() -> None:
             ])
         ).all()
 
-        if not stuck:
-            return
+        # Count documents actually re-queued, once each, by the status under
+        # which they are routed (not by their status after workers touch them).
+        pii_requeued = 0
+        extracted_requeued = 0
 
-        logger.info("Recovery: found %d stuck document(s) — re-queuing", len(stuck))
+        if stuck:
+            logger.info("Recovery: found %d stuck document(s) — re-queuing", len(stuck))
 
         for doc in stuck:
             redacted_path = (
@@ -81,11 +84,22 @@ def recover_stuck_docs() -> None:
 
             if doc.status == "PII_PROCESSED":
                 queues.extraction_queue.put(msg)
+                pii_requeued += 1
                 logger.info("Recovery: re-queued %s -> extraction_queue", doc.doc_id)
             elif doc.status == "EXTRACTED":
                 queues.embedding_queue.put(msg)
                 queues.keyword_queue.put(msg)
+                extracted_requeued += 1
                 logger.info("Recovery: re-queued %s -> embedding + keyword queues", doc.doc_id)
+
+        total = pii_requeued + extracted_requeued
+        if total:
+            logger.info(
+                "Recovery summary: %d re-queued (PII_PROCESSED: %d, EXTRACTED: %d)",
+                total, pii_requeued, extracted_requeued,
+            )
+        else:
+            logger.info("Recovery summary: nothing to re-queue")
 
     finally:
         session.close()
