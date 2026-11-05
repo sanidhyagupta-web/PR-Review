@@ -30,14 +30,16 @@ tags: [ingestion, pipeline-entrypoint, pdf, dicom, ocr]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-10-30 |
+| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-11-05 |
 
 ## Domain Purpose
 
 The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text,
 including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed, stores the raw bytes encrypted in S3, and converts it
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
-clean, structured text instead of raw file bytes.
+clean, structured text instead of raw file bytes. It also recovers documents that were in flight
+when the process last stopped, and tells the operator at startup, in one line, how many documents
+that recovery actually re-queued.
 
 ## Entities Owned
 
@@ -107,12 +109,15 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | BR-08 | Bulk ingest accepts at most 50 files per request | `app/main.py:171-172` | MEDIUM |
 | BR-09 | `.md` is ingested exactly like `.txt`: `detect_doc_type` returns `"text"` (case-insensitive), so `ParserWorker` uses `parse_text_file` — Markdown syntax is preserved, never parsed or rendered. The detector's unsupported-extension error lists `.md` among accepted extensions | `ingestion/parsers/doc_type_detector.py:67-68,70-73`, `workers/parser_worker.py:84-87` | HIGH |
 | BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:68-97`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
+| BR-11 | Startup recovery logs exactly one final `Recovery summary` INFO record from logger `run`, after the found-count, per-document and missing-file lines and before `main()` seeds: `Recovery summary: {total} re-queued (PII_PROCESSED: {n}, EXTRACTED: {n})` — both status counts always present, even when one is 0 | `run.py:95-102` | MEDIUM |
+| BR-12 | The summary counts only documents actually re-queued, once each, under the status that routed them (an `EXTRACTED` doc put on both embedding and keyword queues counts 1). A doc skipped for a missing redacted file counts nowhere. With zero re-queued — no stuck docs, or all skipped — the line is `Recovery summary: nothing to re-queue` | `run.py:63-64,87,92,95-102` | MEDIUM |
 
 ## External Integrations
 
 | System | Trigger | What Happens |
 |---|---|---|
 | AWS S3 (+ KMS) | every raw/parsed/markdown file write | Encrypted upload; `TokenRetrievalError`/`NoCredentialsError` surfaces as a user-facing "run `aws sso login`" message (`app/main.py:65-69`) |
+| `run.py:recover_stuck_docs()` | process startup, after workers start and before optional seeding | Re-queues `PII_PROCESSED` docs to `extraction_queue` and `EXTRACTED` docs to `embedding_queue` + `keyword_queue` (skipping docs whose `redacted_chunks.json` is missing), then logs the recovery summary |
 | Filesystem watcher | polls `watch_dirs` every 5s | `ingestion/watcher.py` auto-calls `ingest_document()` on new files, `uploader_id="watcher"` |
 | ParserWorker (async) | `parsing_queue` message | Downloads from S3 → detects type → parses (PyMuPDF/pydicom/text) or OCRs (Claude Vision → Tesseract fallback) → uploads extracted text → `markdown_queue` |
 | MarkdownWorker (async) | `markdown_queue` message | Converts extracted text to structured Markdown (heading promotion) → `chunking_queue` (Feat-0002) |
@@ -135,6 +140,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 |---|---|---|
 | Adding a new `DocStatus` value or transition | Breaks recovery | `run.py:recover_stuck_docs()` hardcodes which statuses are recoverable (`PII_PROCESSED`, `EXTRACTED`) — a new in-flight status won't be recovered after a crash |
 | Changing the `role` check on `/ingest/bulk` | Security | This is the *only* authorization gate on ingest — see the unauthenticated-header gap above; don't relax it further without also fixing the auth mechanism |
+| Moving the `Recovery summary` log into the `finally` block, or counting queue puts / re-reading doc status instead of counting in the routing branches | Misleading operator log | The summary must only appear on normal completion (exceptions propagate without it), and counts documents, not queue messages; workers already running can change a doc's status mid-recovery (`run.py:63-102`) |
 | Changing queue message shape (`doc_id`, `raw_s3_key`, etc.) | Breaks downstream | Every worker in the chain (Feat-0002, Feat-0004, Feat-0006) expects exact message keys |
 
 ### Human Escalation Required
@@ -155,7 +161,14 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 
 - `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, and a source-level check of both pickers' `type` lists.
 - `tests/unit/test_dicom_parser.py` covers `detect_doc_type` (including `.md`/`.MD`, the accepted-extension error list, `.markdown` rejection) and `ParserWorker` routing `.txt`/`.md` through the real detector and text parser.
+- `tests/unit/test_run_recovery.py` runs the real `recover_stuck_docs()` and `main()` with fake DB/queue/worker modules (installed only inside its fixture). It asserts exact summary messages and cardinality, log order, queue destinations and payloads, skipped and empty cases, status changes during enqueue, session close, exception propagation without a summary, and summary-before-seeding order.
 - `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
+
+## Architectural Decisions
+
+| Decision | Reason | Do Not Change Without |
+|---|---|---|
+| Recovery has no early return on an empty query; the found-count line is still logged only when candidates exist (`run.py:66-67`) | Lets the empty and all-skipped cases share the one zero-result summary path (`run.py:101-102`) | Keeping the `nothing to re-queue` line for both cases and the existing log lines unchanged |
 
 ## Forbidden Patterns
 
@@ -172,6 +185,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 - `workers/parser_worker.py`, `workers/markdown_worker.py` — this feature's two async stages
 - `storage/s3_client.py` — the single choke-point for all file I/O
 - `queues/queue_client.py`, `queues/dlq.py` — in-memory queue + dead-letter handling
+- `run.py` — process entry point; `recover_stuck_docs()` re-queues stuck documents and logs the recovery summary
 
 ## Context Routing
 
