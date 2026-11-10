@@ -1,6 +1,6 @@
 # Architecture Overview — Healthcare Ingestion Pipeline
 
-Last updated: 2026-09-05
+Last updated: 2026-11-10
 
 ## System Topology
 
@@ -77,7 +77,7 @@ feature's own Architectural Decisions table.
 | Decision | Reason | Recurs In |
 |---|---|---|
 | In-memory `queue.Queue`-based pipeline instead of a durable broker | Simplicity for a single-process prototype | Feat-0002, Feat-0003, Feat-0004, Feat-0006 |
-| Retry-then-DLQ pattern (`workers/base_worker.py`, max 3 retries) is the uniform failure-handling strategy for every worker | One shared base class, one shared failure semantics | Feat-0002, Feat-0003, Feat-0004, Feat-0006 |
+| Retry-then-DLQ pattern (`workers/base_worker.py`, max 7 retries) is the uniform failure-handling strategy for every worker | One shared base class, one shared failure semantics | Feat-0002, Feat-0003, Feat-0004, Feat-0006 |
 | Role-string RBAC (`allowed_roles` chunk metadata + a `role` string) instead of per-user or per-patient ownership | Matches a department-based hospital access model | Feat-0004, Feat-0005, Feat-0007 |
 | No database migration tool — SQLAlchemy `create_all()` is the entire schema-management story | Prototype-stage simplicity | Feat-0002 (schema), Feat-0003 (schema), `Schemas/schemas.md` |
 | Two unrelated authentication mechanisms for two entry points into the same pipeline: session login (Streamlit) vs. an unauthenticated, self-reported `role` header (FastAPI `/ingest/bulk`) | Historical/prototype — the HTTP endpoint was likely added for programmatic/service use without an auth story | Feat-0001, Feat-0003, Feat-0007 |
