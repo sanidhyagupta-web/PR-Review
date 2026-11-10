@@ -30,14 +30,14 @@ tags: [ingestion, pipeline-entrypoint, pdf, dicom, ocr]
 
 | Type | Package | Path | Domain | Last updated |
 |---|---|---|---|---|
-| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-10-30 |
+| backend-service | (none — plain Python module tree) | `app/`, `ingestion/`, `workers/{base,parser,markdown}_worker.py`, `storage/`, `queues/` | document-ingestion | 2026-11-10 |
 
 ## Domain Purpose
 
 The front door of the pipeline: accepts a healthcare document (PDF, DICOM, or plain text,
 including clinicians' Markdown note exports, which are read as plain text), validates it's safe and well-formed, stores the raw bytes encrypted in S3, and converts it
 through parsing and markdown formatting so downstream stages (PII redaction, chunking) receive
-clean, structured text instead of raw file bytes.
+clean, structured text instead of raw file bytes. Its operating limits (retry ceiling, queue capacity and the agreed ingestion defaults for worker count, timeout, batch size, skipped-row message and strict-ingest mode) are published as one shared configuration so the agreed values are set in one place for every environment.
 
 ## Entities Owned
 
@@ -77,8 +77,8 @@ enforcement point — it calls `can_transition()` and raises `RegistryError` on 
   everything downloaded from S3 is processed in memory/temp and deleted after re-upload.
 - S3 objects are always encrypted (KMS if `kms_key_id` configured, else SSE-S3 fallback) —
   `storage/s3_client.py:42-46`.
-- After 3 failed retries, a message goes to the DLQ instead of being retried again indefinitely
-  (`workers/base_worker.py:32-36`).
+- After 7 failed retries (`Settings.max_retries`, `app/config.py:24`), a message goes to the DLQ instead of being retried again indefinitely
+  (`workers/base_worker.py:32-36`). A message is attempted 8 times in total: retries are re-enqueued while `retry_count < max_retries`, the `>=` check sends it to the DLQ.
 
 ## Access Control
 
@@ -98,7 +98,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | ID | Rule | Enforced In | Severity |
 |---|---|---|---|
 | BR-01 | Bulk path (`DocumentValidator`): extension (lowercased, so `.MD` = `.md`) must be one of `.pdf`, `.txt`, `.text`, `.md`, `.dcm`; unsupported types (including `.markdown`) rejected with the unchanged reason `Unsupported file type: '<ext>'`; executables (PE/ELF/shebang magic bytes) rejected | `ingestion/validator.py:10,44-45,55-57` | CRITICAL |
-| BR-02 | File size ≤ 50 MB | `app/config.py:30` | HIGH |
+| BR-02 | File size ≤ 50 MB | `app/config.py:37` | HIGH |
 | BR-03 | `.dcm` files must have a valid DICOM preamble/magic bytes | `ingestion/validator.py:59-63`, `ingestion/parsers/doc_type_detector.py:49-58` | HIGH |
 | BR-04 | Duplicate filename (non-failed, non-duplicate existing doc) is rejected | `app/main.py:116-117`, `ingestion/registry.py:70-82` | MEDIUM |
 | BR-05 | OCR average confidence < 0.40 (configurable) → document FAILED, sent to DLQ | `ingestion/ocr/ocr_quality.py:26-33`, `workers/parser_worker.py:64-78` | HIGH |
@@ -107,6 +107,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | BR-08 | Bulk ingest accepts at most 50 files per request | `app/main.py:171-172` | MEDIUM |
 | BR-09 | `.md` is ingested exactly like `.txt`: `detect_doc_type` returns `"text"` (case-insensitive), so `ParserWorker` uses `parse_text_file` — Markdown syntax is preserved, never parsed or rendered. The detector's unsupported-extension error lists `.md` among accepted extensions | `ingestion/parsers/doc_type_detector.py:67-68,70-73`, `workers/parser_worker.py:84-87` | HIGH |
 | BR-10 | The single-file path (`ingest_document` → `validate_file`) has **no extension allow-list**; it checks existence, empty, size, executable header and MIME (`text/plain`/`application/pdf`) only. Only the single-upload picker offers `.md` (`type=["pdf","txt","md"]`); the bulk-upload picker stays `["pdf","txt","dcm"]` though bulk backend accepts `.md` | `ingestion/validator.py:68-97`, `ui/upload_page.py:70`, `ui/bulk_upload_page.py:87` | MEDIUM |
+| BR-11 | Ingestion defaults live on `Settings`, same in every environment (typed literals, no env lookups): `max_retries=7`, `queue_max_size=500`, `max_workers=12`, `timeout_seconds=45`, `batch_size=250`, `skipped_rows_log_template="ingest: skipped {count} rows with no patient id"` (stored unformatted, `{count}` retained), `strict_ingest=True` (a boolean, not a flag name). Only `max_retries` and `queue_max_size` are consumed (`workers/base_worker.py:32`, `queues/queue_client.py:14`); `max_workers`, `timeout_seconds`, `batch_size`, `skipped_rows_log_template` and `strict_ingest` have **no consumers**: `run.py` still starts a fixed seven-stage worker list, `worker_poll_timeout` (1.0) still drives polling, `embedding_batch_size` (32) is independent, and nothing formats the template or reads `strict_ingest` | `app/config.py:22-31` | MEDIUM |
 
 ## External Integrations
 
@@ -129,12 +130,14 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 ### Safe
 - Adding a new supported file extension to `ingestion/validator.py`'s allow-list, provided a matching parser/OCR path exists. A new extension must also be added to `detect_doc_type` (otherwise `ParserWorker` fails after upload) and, if single upload should offer it, to `ui/upload_page.py`'s picker; the two validators and the two pickers are independent lists.
 - Raising/lowering `max_file_size_bytes` or `ocr_confidence_threshold` in `app/config.py`.
+- Reading the unused ingestion defaults (BR-11) from new code, as long as the change is its own ticket; they are placeholders until a consumer exists.
 
 ### Dangerous — Requires Review
 | Change | Risk | Why |
 |---|---|---|
 | Adding a new `DocStatus` value or transition | Breaks recovery | `run.py:recover_stuck_docs()` hardcodes which statuses are recoverable (`PII_PROCESSED`, `EXTRACTED`) — a new in-flight status won't be recovered after a crash |
 | Changing the `role` check on `/ingest/bulk` | Security | This is the *only* authorization gate on ingest — see the unauthenticated-header gap above; don't relax it further without also fixing the auth mechanism |
+| Changing `max_retries` or `queue_max_size` | Retry volume / queue back-pressure | Every `BaseWorker` subclass retries up to `max_retries` times before the DLQ, and every stage queue is sized from `queue_max_size`; ENG-40 raised retries from 3 to 7 |
 | Changing queue message shape (`doc_id`, `raw_s3_key`, etc.) | Breaks downstream | Every worker in the chain (Feat-0002, Feat-0004, Feat-0006) expects exact message keys |
 
 ### Human Escalation Required
@@ -149,11 +152,12 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 | S3 credentials expired | `ValueError` with `aws sso login` instructions | `TokenRetrievalError`/`NoCredentialsError` (`app/main.py:65-69`) |
 | OCR quality too low | Document `FAILED`, sent to DLQ | `avg_confidence < 0.40` |
 | Invalid state transition | `RegistryError`, sent to DLQ | `can_transition()` rejects the edge |
-| Max retries exceeded | Sent to DLQ | `workers/base_worker.py:32-36` |
+| Max retries exceeded (after 7 retries) | Sent to DLQ | `workers/base_worker.py:32-36` |
 
 ## Testing Expectations
 
 - `tests/unit/test_bulk_ingestion.py` covers RBAC (role accept/reject), batch size limits, mixed valid/invalid batches, audit event emission, and exception isolation (one bad file doesn't fail the batch). It also covers `.txt`/`.md`/`.MD` parity: validator acceptance and safety rejections, `ingest_document` enqueue payload and rejections (with `settings.failed_dir` redirected to `tmp_path`), duplicates, and a source-level check of both pickers' `type` lists.
+- `tests/unit/test_config.py` covers the seven ingestion defaults (value and exact type, on `Settings()` and the shared `settings`), the unformatted log template, `strict_ingest is True`, unchanged `worker_poll_timeout`/`embedding_batch_size`, `QueueClient` capacity, and `BaseWorker.run` retrying through 7 before DLQ with a fake queue.
 - `tests/unit/test_dicom_parser.py` covers `detect_doc_type` (including `.md`/`.MD`, the accepted-extension error list, `.markdown` rejection) and `ParserWorker` routing `.txt`/`.md` through the real detector and text parser.
 - `ingest_document()` is covered for text files only (see above). No test coverage found for the file watcher or OCR quality gating — *Open question: are these covered elsewhere or genuinely untested?*
 
@@ -172,6 +176,7 @@ boundary, since nothing verifies the header wasn't just made up by the caller.
 - `workers/parser_worker.py`, `workers/markdown_worker.py` — this feature's two async stages
 - `storage/s3_client.py` — the single choke-point for all file I/O
 - `queues/queue_client.py`, `queues/dlq.py` — in-memory queue + dead-letter handling
+- `app/config.py` — `Settings` dataclass and shared `settings` instance (limits and ingestion defaults)
 
 ## Context Routing
 

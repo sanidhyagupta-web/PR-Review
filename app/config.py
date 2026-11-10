@@ -21,7 +21,14 @@ class Settings:
 
     queue_max_size: int = 500
     worker_poll_timeout: float = 1.0
-    max_retries: int = 3
+    max_retries: int = 7
+
+    # Ingestion defaults (ENG-40). Stored for future use; nothing reads these yet.
+    max_workers: int = 12
+    timeout_seconds: int = 45
+    batch_size: int = 250
+    skipped_rows_log_template: str = "ingest: skipped {count} rows with no patient id"
+    strict_ingest: bool = True
 
     allowed_mime_types: list = field(default_factory=lambda: [
         "application/pdf",
